@@ -78,7 +78,7 @@ app.post('/webhook-midtrans', async (req, res) => {
       (transaction_status === 'capture' && fraud_status === 'accept');
 
     if (bayarSukses) {
-      const transaksi = db.get(order_id);
+      const transaksi = await db.get(order_id);
 
       if (transaksi && transaksi.status === 'PENDING') {
         // Update DB
@@ -102,8 +102,8 @@ app.post('/webhook-midtrans', async (req, res) => {
 // ================================
 // ENDPOINT: Tablet polling status
 // ================================
-app.get('/status/:orderId', (req, res) => {
-  const transaksi = db.get(req.params.orderId);
+app.get('/status/:orderId', async (req, res) => {
+  const transaksi = await db.get(req.params.orderId);
   if (!transaksi) {
     return res.status(404).json({ error: 'Transaksi tidak ditemukan' });
   }
