@@ -1,41 +1,25 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
-
-const db = new sqlite3.Database(path.join(__dirname, '../laundry.db'));
-
-// Buat tabel
-db.serialize(() => {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS transaksi (
-      id          INTEGER PRIMARY KEY AUTOINCREMENT,
-      order_id    TEXT UNIQUE NOT NULL,
-      mesin_id    TEXT NOT NULL,
-      menit       INTEGER NOT NULL,
-      harga       INTEGER NOT NULL,
-      status      TEXT DEFAULT 'PENDING',
-      created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-});
+// Simple in-memory storage — no SQLite needed
+const transaksi = {};
 
 function simpan({ orderId, mesinId, menit, harga }) {
-  db.run(
-    `INSERT INTO transaksi (order_id, mesin_id, menit, harga) VALUES (?, ?, ?, ?)`,
-    [orderId, mesinId, menit, harga]
-  );
+  transaksi[orderId] = {
+    order_id: orderId,
+    mesin_id: mesinId,
+    menit,
+    harga,
+    status: 'PENDING',
+    created_at: new Date().toISOString(),
+  };
 }
 
 function updateStatus(orderId, status) {
-  db.run(`UPDATE transaksi SET status = ? WHERE order_id = ?`, [status, orderId]);
+  if (transaksi[orderId]) {
+    transaksi[orderId].status = status;
+  }
 }
 
 function get(orderId) {
-  return new Promise((resolve, reject) => {
-    db.get(`SELECT * FROM transaksi WHERE order_id = ?`, [orderId], (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
-    });
-  });
+  return transaksi[orderId] || null;
 }
 
 module.exports = { simpan, updateStatus, get };
