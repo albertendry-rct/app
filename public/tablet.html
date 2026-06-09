@@ -1,2 +1,223 @@
-const SERVER = 'https://app-production-23ba.up.railway.app';
-const MESIN_ID = 'M1';
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Laundry Self Service</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #0f172a;
+      color: white;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .wrap { width: 100%; max-width: 420px; padding: 24px; text-align: center; }
+    h1 { font-size: 1.6rem; color: #38bdf8; margin-bottom: 4px; }
+    .sub { color: #64748b; font-size: 0.9rem; margin-bottom: 28px; }
+
+    .grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-bottom: 20px; }
+    .kartu {
+      background: #1e293b; border: 2px solid #334155;
+      border-radius: 14px; padding: 18px 8px; cursor: pointer; transition: .2s;
+    }
+    .kartu:hover, .kartu.aktif { border-color: #38bdf8; background: #0c4a6e; }
+    .kartu .dur { font-size: 1.6rem; font-weight: 700; }
+    .kartu .hrg { font-size: 0.8rem; color: #94a3b8; margin-top: 4px; }
+    .btn {
+      width: 100%; padding: 14px; border: none; border-radius: 12px;
+      font-size: 1rem; font-weight: 600; cursor: pointer; transition: .2s;
+    }
+    .btn-primary { background: #0284c7; color: white; }
+    .btn-primary:hover { background: #0369a1; }
+    .btn-primary:disabled { background: #1e293b; color: #475569; cursor: not-allowed; }
+    .btn-ghost {
+      background: transparent; border: 1px solid #334155;
+      color: #64748b; margin-top: 10px;
+    }
+
+    #layar-qr, #layar-aktif { display: none; }
+    #qrcode { background: white; padding: 14px; border-radius: 12px; display: inline-block; margin: 16px 0; }
+    .kotak-info { background: #1e293b; border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+    .nominal { font-size: 2rem; font-weight: 700; color: #4ade80; }
+    .hint { font-size: 0.8rem; color: #64748b; margin-top: 4px; }
+    .expire { color: #fbbf24; font-size: 0.85rem; margin-bottom: 14px; }
+
+    .timer { font-size: 5rem; font-weight: 700; color: #4ade80; font-variant-numeric: tabular-nums; margin: 12px 0; }
+    .progress-wrap { background: #1e293b; border-radius: 99px; height: 10px; overflow: hidden; margin: 12px 0 20px; }
+    .progress { height: 100%; background: linear-gradient(90deg,#22d3ee,#4ade80); border-radius: 99px; transition: width 1s linear; }
+    .note { font-size: 0.85rem; color: #64748b; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- LAYAR 1: PILIH DURASI -->
+  <div id="layar-pilih">
+    <h1>🧺 Self Service Laundry</h1>
+    <div class="sub" id="label-mesin">Mesin M1</div>
+    <div class="grid">
+      <div class="kartu" onclick="pilih(30,this)">
+        <div class="dur">30'</div>
+        <div class="hrg">Rp 10.000</div>
+      </div>
+      <div class="kartu" onclick="pilih(45,this)">
+        <div class="dur">45'</div>
+        <div class="hrg">Rp 14.000</div>
+      </div>
+      <div class="kartu" onclick="pilih(60,this)">
+        <div class="dur">60'</div>
+        <div class="hrg">Rp 18.000</div>
+      </div>
+    </div>
+    <button class="btn btn-primary" id="btn-lanjut" onclick="buatQR()" disabled>
+      Lanjut ke Pembayaran →
+    </button>
+  </div>
+
+  <!-- LAYAR 2: SCAN QR -->
+  <div id="layar-qr">
+    <h1>Scan & Bayar</h1>
+    <div class="sub">Gunakan GoPay / OVO / Dana / m-Banking</div>
+    <div id="qrcode"></div>
+    <div class="kotak-info">
+      <div class="hint">Total Bayar</div>
+      <div class="nominal" id="txt-nominal"></div>
+      <div class="hint" id="txt-durasi"></div>
+    </div>
+    <div class="expire">⏳ QR expired dalam <b id="txt-expire">120</b> detik</div>
+    <button class="btn btn-ghost" onclick="batal()">← Batal</button>
+  </div>
+
+  <!-- LAYAR 3: MESIN AKTIF -->
+  <div id="layar-aktif">
+    <h1>✅ Mesin Aktif</h1>
+    <div class="sub" id="label-aktif"></div>
+    <div class="timer" id="txt-timer">00:00</div>
+    <div class="progress-wrap">
+      <div class="progress" id="progress" style="width:100%"></div>
+    </div>
+    <p class="note">Jangan cabut pakaian sebelum timer selesai ya!</p>
+  </div>
+
+</div>
+<script>
+  // ======== EDIT INI ========
+  const SERVER = 'https://app-production-23ba.up.railway.app';
+  const MESIN_ID = 'M1';
+  // ==========================
+
+  document.getElementById('label-mesin').textContent = `Mesin ${MESIN_ID}`;
+
+  let menitDipilih = null, orderId = null;
+  let tPolling, tExpire, tTimer;
+  let sisaDetik = 0, totalDetik = 0;
+
+  function pilih(menit, el) {
+    menitDipilih = menit;
+    document.querySelectorAll('.kartu').forEach(k => k.classList.remove('aktif'));
+    el.classList.add('aktif');
+    document.getElementById('btn-lanjut').disabled = false;
+  }
+
+  async function buatQR() {
+    const btn = document.getElementById('btn-lanjut');
+    btn.disabled = true;
+    btn.textContent = 'Membuat QR...';
+    try {
+      const r = await fetch(`${SERVER}/buat-transaksi`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mesinId: MESIN_ID, menit: menitDipilih }),
+      });
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      orderId = d.orderId;
+      tampilQR(d);
+    } catch (e) {
+      alert('Gagal konek server. Coba lagi!');
+      btn.disabled = false;
+      btn.textContent = 'Lanjut ke Pembayaran →';
+    }
+  }
+
+  function tampilQR(d) {
+    show('layar-qr');
+    document.getElementById('txt-nominal').textContent =
+      'Rp ' + d.harga.toLocaleString('id-ID');
+    document.getElementById('txt-durasi').textContent = `Durasi ${d.menit} menit`;
+
+    document.getElementById('qrcode').innerHTML = '';
+    new QRCode(document.getElementById('qrcode'), {
+      text: d.qrUrl, width: 200, height: 200
+    });
+
+    let sisa = 120;
+    tExpire = setInterval(() => {
+      sisa--;
+      document.getElementById('txt-expire').textContent = sisa;
+      if (sisa <= 0) { clearInterval(tExpire); batal(); }
+    }, 1000);
+
+    tPolling = setInterval(async () => {
+      try {
+        const r = await fetch(`${SERVER}/status/${orderId}`);
+        const s = await r.json();
+        if (s.status === 'DIBAYAR') {
+          clearInterval(tPolling);
+          clearInterval(tExpire);
+          tampilAktif(s.menit);
+        }
+      } catch(e) {}
+    }, 3000);
+  }
+
+  function batal() {
+    clearInterval(tPolling); clearInterval(tExpire);
+    orderId = null;
+    document.getElementById('btn-lanjut').disabled = false;
+    document.getElementById('btn-lanjut').textContent = 'Lanjut ke Pembayaran →';
+    show('layar-pilih');
+  }
+
+  function tampilAktif(menit) {
+    show('layar-aktif');
+    document.getElementById('label-aktif').textContent = `Mesin ${MESIN_ID} sedang berjalan`;
+    totalDetik = menit * 60;
+    sisaDetik = totalDetik;
+    updateTimer();
+    tTimer = setInterval(() => {
+      sisaDetik--;
+      updateTimer();
+      if (sisaDetik <= 0) {
+        clearInterval(tTimer);
+        setTimeout(() => {
+          menitDipilih = null;
+          document.querySelectorAll('.kartu').forEach(k => k.classList.remove('aktif'));
+          document.getElementById('btn-lanjut').disabled = true;
+          document.getElementById('btn-lanjut').textContent = 'Lanjut ke Pembayaran →';
+          show('layar-pilih');
+        }, 5000);
+      }
+    }, 1000);
+  }
+
+  function updateTimer() {
+    const m = String(Math.floor(sisaDetik/60)).padStart(2,'0');
+    const s = String(sisaDetik%60).padStart(2,'0');
+    document.getElementById('txt-timer').textContent = `${m}:${s}`;
+    document.getElementById('progress').style.width = (sisaDetik/totalDetik*100)+'%';
+  }
+
+  function show(id) {
+    ['layar-pilih','layar-qr','layar-aktif'].forEach(l => {
+      document.getElementById(l).style.display = l === id ? 'block' : 'none';
+    });
+  }
+</script>
+</body>
+</html>
